@@ -1,0 +1,42 @@
+name: ci
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check if maintenance is in progress
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -x
+          # maintenance workflow id
+          workflow_ids="127896536"
+          api_path="repos/${{ github.repository }}/actions/runs"
+
+          # Define the timeout and delay
+          timeout=$((5 * 60))
+          delay=5
+          elapsed=0
+
+          # Loop until no runs of the affected workflows which started before the current run
+          while [ "$elapsed" -lt "$timeout" ]; do
+            in_progress_runs=$(gh api "${api_path}?status=in_progress" -q "[.workflow_runs[] | select(.workflow_id | IN(${workflow_ids}))] | length")
+            pending_runs=$(gh api "${api_path}?status=pending" -q "[.workflow_runs[] | select(.workflow_id | IN(${workflow_ids}))] | length")
+            waiting_runs=$(gh api "${api_path}?status=waiting" -q "[.workflow_runs[] | select(.workflow_id | IN(${workflow_ids}))] | length")
+
+            # Exit the loop if no runs are found
+            if [[ $waiting_runs -eq 0 && $pending_runs -eq 0 && $in_progress_runs -eq 0 ]]; then
+              echo "No running instances of affected workflows. Proceeding..."
+              break
+            fi
+
+            echo "${runs} CI runs are currently running. Waiting for $delay seconds..."
+            sleep $delay
+            elapsed=$((elapsed + delay))
+          done
+      - name: Run tests
+        run: echo "Running tests" && sleep 60

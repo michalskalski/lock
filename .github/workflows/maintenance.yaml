@@ -1,0 +1,54 @@
+name: maintenance
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  lock:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Wait until all affected workflows are completed
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -x
+          affected_workflow_ids="127898300"
+
+          api_path="repos/${{ github.repository }}/actions/runs"
+
+          # https://docs.github.com/en/rest/actions/workflow-runs?apiVersion=2022-11-28#get-a-workflow-run
+          start_time=$(gh api "${api_path}/${GITHUB_RUN_ID}" -q '.run_started_at')
+
+          # Define the timeout and delay
+          timeout=$((5 * 60))
+          delay=5
+          elapsed=0
+
+          # Loop until no runs of the affected workflows which started before the current run
+          while [ "$elapsed" -lt "$timeout" ]; do
+            # https://docs.github.com/en/rest/actions/workflow-runs?apiVersion=2022-11-28#list-workflow-runs-for-a-repository
+            # https://docs.github.com/en/search-github/getting-started-with-searching-on-github/understanding-the-search-syntax#query-for-dates
+
+            runs=$(gh api "${api_path}?status=in_progress&created=<${start_time}" -q "[.workflow_runs[] | select(.workflow_id | IN(${affected_workflow_ids}))] | length")
+
+            # Exit the loop if no runs are found
+            if [[ "$runs" -eq 0 ]]; then
+              echo "No running instances of affected workflows. Proceeding..."
+              break
+            fi
+
+            echo "${runs} CI runs are currently running. Waiting for $delay seconds..."
+            sleep $delay
+            elapsed=$((elapsed + delay))
+          done
+
+          # Fail if timeout is reached
+          if [ "$elapsed" -ge "$timeout" ]; then
+            echo "Timeout reached when ${runs} runs still running."
+            exit 1
+          fi
+      - name: maintenance work
+        run: sleep 60
