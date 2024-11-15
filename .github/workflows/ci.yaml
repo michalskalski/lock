@@ -10,12 +10,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Check if locked part of maintenance is in progress
-        uses: ./.github/actions/wait-for-workflows-to-finish
+        uses: ./.github/actions/lock-branch
         with:
-          # lock-workflow id
-          workflow_ids: "128058478"
           timeout: 300
           delay: 5
           token: ${{ secrets.GITHUB_TOKEN }}
+          mode: 'wait'
       - name: Run tests
         run: echo "Running tests" && sleep 60

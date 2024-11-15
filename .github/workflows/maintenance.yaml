@@ -2,21 +2,57 @@ name: maintenance
 
 on:
   workflow_dispatch:
+    inputs:
+      workflow_ids:
+        description: 'Comma separated list of workflow ids'
+        required: true
+        default: '127898300'
+        type: string
+
+permissions:
+  contents: write  # Allows creating and deleting branche
 
 jobs:
   job1:
-    uses: ./.github/workflows/lock-workflow.yaml
-    with:
-      workflow_ids: '127898300'
-    secrets:
-      token: ${{ secrets.GITHUB_TOKEN }}
-  job2:
     runs-on: ubuntu-latest
-    needs: job1
     steps:
-      - name: maintenance work
+      - uses: actions/checkout@v4
+        id: checkout
+
+      - name: Create lock
+        uses: ./.github/actions/lock-branch
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          mode: 'lock'
+          sha: ${{ steps.checkout.outputs.commit }}
+
+      - name: Get run start time
+        id: start
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          echo "Outputs from lock workflow"
-          echo "${{ needs.job1.outputs.firstword }}"
-          echo "${{ needs.job1.outputs.secondword }}"
-          sleep 60
+          set -x
+          api_path="repos/${{ github.repository }}/actions/runs"
+          echo "start_time=$(gh api "${api_path}/${GITHUB_RUN_ID}" -q '.run_started_at')" >> $GITHUB_OUTPUT
+
+      - name: Wait until all affected workflows are completed
+        uses: ./.github/actions/wait-for-workflows-to-finish
+        with:
+          workflow_ids: ${{ inputs.workflow_ids }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+          timeout: 600
+          delay: 5
+          query_params: "status=in_progress&created=<${{ steps.start.outputs.start_time }}"
+
+      - name: Op which requires lock
+        run: sleep 60
+
+      - name: Unlock
+        uses: ./.github/actions/lock-branch
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          mode: 'unlock'
+        if: always()
+
+      - name: Op which do not require lock
+        run: sleep 30

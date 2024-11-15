@@ -1,0 +1,97 @@
+name: 'Lock branch'
+description: 'Simple locking system based on branch presence'
+inputs:
+  branch_name:
+    description: 'Name of the lock branch'
+    required: true
+    default: 'maintenance-lock-branch'
+    type: string
+  mode:
+    description: 'lock | unlock | check | wait'
+    required: true
+    type: string
+  token:
+    description: 'A Github PAT'
+    required: true
+    type: string
+  sha:
+    description: 'Ref sha for branch creation. Required for lock mode'
+    type: string
+  timeout:
+    default: 600
+  delay:
+    default: 10
+outputs:
+  is_locked:
+    description: "when action run with 'check' mode it is set to 'true' when branch exist or 'false' when absent"
+
+runs:
+  using: "composite"
+  steps:
+    - name: 'invalid mode type'
+      if: inputs.mode != 'lock' &&  inputs.mode == 'unlock' &&  inputs.mode == 'check' &&  inputs.mode == 'wait'
+      shell: bash
+      run: |
+        echo "Wrong mode: ${{ inputs.mode }}. Should be one of: lock, unlock, check, wait"
+
+    - name: 'Lock'
+      if: inputs.mode == 'lock'
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ inputs.token }}
+      run: |
+        gh api \
+        --method POST \
+        -H "Accept: application/vnd.github+json" \
+        -H "X-GitHub-Api-Version: 2022-11-28" \
+        /repos/${{ github.repository }}/git/refs \
+        -f "ref=refs/heads/${{ inputs.branch_name}}" -f "sha=${{ inputs.sha }}"
+
+    - name: 'Unlock'
+      if: inputs.mode == 'unlock'
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ inputs.token }}
+      run: |
+        gh api \
+        --method DELETE \
+        -H "Accept: application/vnd.github+json" \
+        -H "X-GitHub-Api-Version: 2022-11-28" \
+        /repos/${{ github.repository }}/git/refs/heads/${{ inputs.branch_name }}
+
+    - name: 'Check'
+      if: inputs.mode == 'check'
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ inputs.token }}
+      run: |
+        if gh api /repos/${{ github.repository }}/branches/${{ inputs.branch_name }}; then
+          echo "is_locked=true" >> $GITHUB_OUTPUT
+        else
+          echo "is_locked=false" >> $GITHUB_OUTPUT
+        fi
+
+    - name: 'Wait'
+      if: inputs.mode == 'wait'
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ inputs.token }}
+      run: |
+        timeout=${{ inputs.timeout }}
+        delay=${{ inputs.delay }}
+        elapsed=0
+
+        while gh api /repos/${{ github.repository }}/branches/${{ inputs.branch_name }} > /dev/null; do
+          echo "Lock branch exists. Waiting for $delay seconds..."
+          sleep $delay
+          elapsed=$((elapsed + delay))
+          if [ $elapsed -ge $timeout ]; then
+            echo "Timeout of $timeout seconds reached. Exiting loop."
+            break
+          fi
+        done
+
+        # Fail if timeout is reached
+        if [ "$elapsed" -ge "$timeout" ]; then
+          exit 1
+        fi
