@@ -16,5 +16,15 @@ jobs:
           delay: 5
           token: ${{ secrets.GITHUB_TOKEN }}
           mode: 'wait'
+      - name: Build
+        id: build
+        run: |
+          echo "somevar=$(echo -e 'one\ntwo\nthree' | tr '\n' ' ')" >> $GITHUB_OUTPUT
+
       - name: Run tests
-        run: echo "Running tests" && sleep 60
+        run: |
+          echo ${{ steps.build.outputs.somevar }}
+          echo "looping through the output..."
+          for i in ${{ steps.build.outputs.somevar }}; do
+            echo $i
+          done
