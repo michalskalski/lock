@@ -1,0 +1,58 @@
+name: 'Wait for workflows to finish'
+description: 'Waits until there is no active run of workflows from workflow_ids list'
+inputs:
+  workflow_ids:
+    description: 'List of workflows'
+    required: true
+    type: string
+  token:
+    description: 'A Github PAT'
+    required: true
+  query_params:
+    description: 'Paramaters for query which gets workflow runs'
+    default: "status=in_progress"
+  timeout:
+    default: 600
+  delay:
+    default: 10
+runs:
+  using: "composite"
+  steps:
+      - name: Wait until all affected workflows are completed
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ inputs.token }}
+        run: |
+          set -x
+          workflow_ids=${{ inputs.workflow_ids }}
+          api_path="repos/${{ github.repository }}/actions/runs"
+          query="${{ inputs.query_params }}"
+
+          # Define the timeout and delay
+          timeout=${{ inputs.timeout }}
+          delay=${{ inputs.delay }}
+          elapsed=0
+
+          # Loop until no runs of the affected workflows which started before the current run
+          while [ "$elapsed" -lt "$timeout" ]; do
+            # https://docs.github.com/en/rest/actions/workflow-runs?apiVersion=2022-11-28#list-workflow-runs-for-a-repository
+            # https://docs.github.com/en/search-github/getting-started-with-searching-on-github/understanding-the-search-syntax#query-for-dates
+
+            runs=$(gh api "${api_path}?${query}" -q "[.workflow_runs[] | select(.workflow_id | IN(${workflow_ids}))] | length")
+
+            # Exit the loop if no runs are found
+            if [[ "$runs" -eq 0 ]]; then
+              echo "No running instances of affected workflows. Proceeding..."
+              break
+            fi
+
+            echo "${runs} CI runs are currently running. Waiting for $delay seconds..."
+            sleep $delay
+            elapsed=$((elapsed + delay))
+          done
+
+          # Fail if timeout is reached
+          if [ "$elapsed" -ge "$timeout" ]; then
+            echo "Timeout reached when ${runs} runs still running."
+            exit 1
+          fi

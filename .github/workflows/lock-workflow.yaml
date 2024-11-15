@@ -1,0 +1,50 @@
+name: lock
+
+on:
+  workflow_call:
+    inputs:
+      workflow_ids:
+        description: 'Comma separated list of workflow ids'
+        required: true
+        type: string
+    outputs:
+      firstword:
+        description: "The first output string"
+        value: ${{ jobs.lockop.outputs.output1 }}
+      secondword:
+        description: "The second output string"
+        value: ${{ jobs.lockop.outputs.output2 }}
+    secrets:
+      token:
+        required: true
+
+jobs:
+  lockop:
+    runs-on: ubuntu-latest
+    outputs:
+      output1: ${{ steps.step3.outputs.firstword }}
+      output2: ${{ steps.step3.outputs.secondword }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Get run start time
+        id: start
+        env:
+          GITHUB_TOKEN: ${{ secrets.token }}
+        run: |
+          set -x
+          api_path="repos/${{ github.repository }}/actions/runs"
+          echo "start_time=$(gh api "${api_path}/${GITHUB_RUN_ID}" -q '.run_started_at')" >> $GITHUB_OUTPUT
+      - name: Wait until all affected workflows are completed
+        uses: ./.github/actions/wait-for-workflows-to-finish
+        with:
+          workflow_ids: ${{ inputs.workflow_ids }}
+          token: ${{ secrets.token }}
+          timeout: 600
+          delay: 5
+          query_params: "status=in_progress&created=<${{ steps.start.outputs.start_time }}"
+      - name: Some job with outputs
+        id: step3
+        run: |
+          sleep 60
+          echo "firstword=hello" >> $GITHUB_OUTPUT
+          echo "secondword=world" >> $GITHUB_OUTPUT
